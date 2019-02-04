@@ -8,11 +8,26 @@ from django.utils.text import capfirst
 from django.utils import formats
 from django.db import models
 from django.contrib.admin.utils import get_fields_from_path
+from django.db import connections
 
 
 def get_today():
     # Get today's date - used for mocking in tests.
     return datetime.date.today()
+
+
+def get_param_values_from_index(db_name=None, parameter_name=None):
+    if not db_name or not parameter_name:
+        return None
+    query = f"""WITH RECURSIVE t AS (
+                        (SELECT extract({parameter_name} from created at time zone 'Europe/Moscow') as {parameter_name} FROM easy_log ORDER BY {parameter_name} LIMIT 1) UNION ALL
+                        SELECT (SELECT extract({parameter_name} from created at time zone 'Europe/Moscow') as {parameter_name} FROM easy_log WHERE extract({parameter_name} from created at time zone 'Europe/Moscow') > t.{parameter_name} ORDER BY {parameter_name} LIMIT 1)
+                        FROM t WHERE t.{parameter_name} IS NOT NULL ) SELECT {parameter_name} FROM t WHERE {parameter_name} IS NOT NULL;"""
+
+    with connections[db_name].cursor() as cursor:
+        cursor.execute(query)
+        rows = cursor.fetchall()
+    return rows
 
 
 def default_date_hierarchy_drilldown(year_lookup=None, month_lookup=None):
@@ -31,6 +46,12 @@ def default_date_hierarchy_drilldown(year_lookup=None, month_lookup=None):
     if year_lookup is None and month_lookup is None:
         # Three years from each direction.
         today = get_today()
+        years = get_param_values_from_index("userlogs", "year")
+        if years:
+            return (
+                datetime.date(int(y[0]), 1, 1)
+                for y in years
+            )
         return (
             datetime.date(y, 1, 1)
             for y in range(today.year - 3, today.year + 3 + 1)
